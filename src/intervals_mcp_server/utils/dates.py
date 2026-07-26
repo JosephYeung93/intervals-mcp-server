@@ -4,7 +4,8 @@ Date utility functions for Intervals.icu MCP Server.
 This module provides helper functions for date parsing and default date calculations.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 def get_default_start_date(days_ago: int = 30) -> str:
@@ -41,6 +42,33 @@ def get_default_future_end_date(days_ahead: int = 30) -> str:
         Date string in YYYY-MM-DD format.
     """
     return (datetime.now() + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+
+def to_local_datetime_str(utc_iso: str, tz_name: str | None) -> str | None:
+    """Convert a UTC ISO-8601 timestamp into a local wall-clock string for the given timezone.
+
+    Args:
+        utc_iso: A UTC timestamp, either with an explicit offset/Z suffix or naive (assumed UTC).
+        tz_name: An IANA timezone name (e.g. "Australia/Sydney"), or None/empty if unknown.
+
+    Returns:
+        The local wall-clock time as "YYYY-MM-DD HH:MM:SS", or None if tz_name is missing,
+        utc_iso can't be parsed, or tz_name isn't a recognized timezone — callers fall back
+        to displaying the raw value rather than a silently wrong one.
+    """
+    if not tz_name:
+        return None
+    try:
+        dt = datetime.fromisoformat(utc_iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        local_dt = dt.astimezone(ZoneInfo(tz_name))
+    except ZoneInfoNotFoundError:
+        return None
+    return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def parse_date_range(

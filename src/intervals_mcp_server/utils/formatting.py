@@ -8,6 +8,8 @@ import json
 from datetime import datetime
 from typing import Any
 
+from intervals_mcp_server.utils.dates import to_local_datetime_str
+
 
 class _KeyTracker(dict):
     """A dict wrapper that records which keys are accessed."""
@@ -30,17 +32,37 @@ class _KeyTracker(dict):
         return super().__contains__(key)
 
 
-def format_activity_summary(activity: dict[str, Any]) -> str:
-    """Format an activity into a readable string."""
-    start_time = activity.get("startTime", activity.get("start_date", "Unknown"))
+def format_activity_summary(activity: dict[str, Any], local_tz: str | None = None) -> str:
+    """Format an activity into a readable string.
 
-    if isinstance(start_time, str) and len(start_time) > 10:
-        # Format datetime if it's a full ISO string
+    Args:
+        activity: The raw activity payload from Intervals.icu.
+        local_tz: The athlete's IANA timezone (e.g. "Australia/Sydney"), used only as a
+            fallback to convert the UTC start_date when the activity has no start_date_local
+            of its own (e.g. a manually-entered activity with no device/GPS local time).
+    """
+    start_time = activity.get("start_date_local")
+
+    if isinstance(start_time, str) and start_time:
+        # Intervals.icu's own local wall-clock time — no conversion needed, just reformat.
         try:
-            dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            start_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+            start_time = datetime.fromisoformat(start_time).strftime("%Y-%m-%d %H:%M:%S")
         except ValueError:
             pass
+    else:
+        start_time = activity.get("startTime", activity.get("start_date", "Unknown"))
+        if isinstance(start_time, str) and len(start_time) > 10:
+            converted = to_local_datetime_str(start_time, local_tz)
+            if converted is not None:
+                start_time = converted
+            else:
+                # No local field and no usable timezone — format the raw UTC value as-is
+                # rather than silently mislabeling it as local.
+                try:
+                    dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                    start_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    pass
 
     rpe = activity.get("perceived_exertion", None)
     if rpe is None:
@@ -463,20 +485,41 @@ Calendar: {cal.get("name", "N/A")}"""
     return event_details
 
 
-def format_activity_message(message: dict[str, Any]) -> str:
-    """Format an activity message/note into a readable string."""
+def format_activity_message(message: dict[str, Any], local_tz: str | None = None) -> str:
+    """Format an activity message/note into a readable string.
+
+    Args:
+        message: The raw activity message payload from Intervals.icu.
+        local_tz: The athlete's IANA timezone (e.g. "Australia/Sydney"), used to convert the
+            UTC created timestamp — messages don't carry a local-time field of their own.
+    """
     created = message.get("created", "Unknown")
     if isinstance(created, str) and len(created) > 10:
-        try:
-            dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-            created = dt.strftime("%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            pass
+        converted = to_local_datetime_str(created, local_tz)
+        if converted is not None:
+            created = converted
+        else:
+            try:
+                dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                created = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                pass
 
     return f"""Author: {message.get("name", "Unknown")}
 Date: {created}
 Type: {message.get("type", "TEXT")}
 Content: {message.get("content", "")}"""
+
+
+def format_athlete_profile(athlete: dict[str, Any]) -> str:
+    """Format an athlete's Intervals.icu account profile into a readable string."""
+    return f"""Athlete Profile:
+
+ID: {athlete.get("id", "N/A")}
+Name: {athlete.get("name", "N/A")}
+City: {athlete.get("city", "N/A")}
+Country: {athlete.get("country", "N/A")}
+Timezone: {athlete.get("timezone", "N/A")}"""
 
 
 def format_custom_item_details(item: dict[str, Any]) -> str:

@@ -9,6 +9,7 @@ from typing import Any
 
 from intervals_mcp_server.api.client import make_intervals_request
 from intervals_mcp_server.config import get_config
+from intervals_mcp_server.tools.athlete import get_athlete_timezone
 from intervals_mcp_server.tools.gear import (
     resolve_gear_for_activity,
     resolve_gear_for_activities,
@@ -84,6 +85,7 @@ def _format_activities_response(
     activities: list[dict[str, Any]],
     athlete_id: str,
     include_unnamed: bool,
+    local_tz: str | None = None,
 ) -> str:
     """Format the activities response based on the results."""
     if not activities:
@@ -97,7 +99,7 @@ def _format_activities_response(
     activities_summary = "Activities:\n\n"
     for activity in activities:
         if isinstance(activity, dict):
-            activities_summary += format_activity_summary(activity) + "\n"
+            activities_summary += format_activity_summary(activity, local_tz=local_tz) + "\n"
         else:
             activities_summary += f"Invalid activity format: {activity}\n\n"
 
@@ -172,7 +174,11 @@ async def get_activities(  # pylint: disable=too-many-arguments,too-many-return-
         activities, athlete_id=athlete_id_to_use, api_key=api_key
     )
 
-    return _format_activities_response(activities, athlete_id_to_use, include_unnamed)
+    # Resolve the athlete's timezone once, as a fallback for any activity that has no
+    # start_date_local of its own (e.g. a manually-entered activity).
+    local_tz = await get_athlete_timezone(athlete_id=athlete_id_to_use, api_key=api_key)
+
+    return _format_activities_response(activities, athlete_id_to_use, include_unnamed, local_tz=local_tz)
 
 
 @mcp.tool()
@@ -202,8 +208,12 @@ async def get_activity_details(activity_id: str, api_key: str | None = None) -> 
     # Resolve gear name (uses configured athlete_id via ATHLETE_ID env var)
     await resolve_gear_for_activity(activity_data, api_key=api_key)
 
+    # Resolve the athlete's timezone as a fallback for activities with no start_date_local
+    # (uses configured ATHLETE_ID env var, same as gear resolution above).
+    local_tz = await get_athlete_timezone(api_key=api_key)
+
     # Return a more detailed view of the activity
-    detailed_view = format_activity_summary(activity_data)
+    detailed_view = format_activity_summary(activity_data, local_tz=local_tz)
 
     # Add additional details if available
     if "zones" in activity_data:
@@ -353,10 +363,14 @@ async def get_activity_messages(activity_id: str, api_key: str | None = None) ->
     if not messages:
         return f"No messages found for activity {activity_id}."
 
+    # Messages carry no local-time field of their own, so their UTC `created` timestamp
+    # always needs converting via the athlete's timezone (uses configured ATHLETE_ID).
+    local_tz = await get_athlete_timezone(api_key=api_key)
+
     output = f"Messages for activity {activity_id}:\n\n"
     for msg in messages:
         if isinstance(msg, dict):
-            output += format_activity_message(msg) + "\n\n"
+            output += format_activity_message(msg, local_tz=local_tz) + "\n\n"
 
     return output
 
