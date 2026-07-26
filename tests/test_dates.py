@@ -34,6 +34,12 @@ def test_to_local_datetime_str_returns_none_for_invalid_timezone():
     assert to_local_datetime_str("2026-07-25T20:36:22Z", "Not/AZone") is None
 
 
+def test_to_local_datetime_str_returns_none_for_malformed_timezone_key():
+    """A malformed timezone key (ZoneInfo raises ValueError, not ZoneInfoNotFoundError
+    for these) fails safe rather than raising."""
+    assert to_local_datetime_str("2026-07-25T20:36:22Z", "../etc/passwd") is None
+
+
 def test_to_local_datetime_str_returns_none_for_unparsable_timestamp():
     """A timestamp that isn't valid ISO-8601 fails safe rather than raising."""
     assert to_local_datetime_str("not-a-timestamp", "Australia/Sydney") is None

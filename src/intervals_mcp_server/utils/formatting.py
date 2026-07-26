@@ -32,6 +32,18 @@ class _KeyTracker(dict):
         return super().__contains__(key)
 
 
+def _reformat_iso_timestamp(value: str) -> str:
+    """Normalize an ISO-8601 timestamp (local or UTC/Z-suffixed) to "YYYY-MM-DD HH:MM:SS".
+
+    Returns the value unchanged if it isn't parsable ISO-8601 — callers show the raw
+    value rather than losing it.
+    """
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return value
+
+
 def format_activity_summary(activity: dict[str, Any], local_tz: str | None = None) -> str:
     """Format an activity into a readable string.
 
@@ -45,24 +57,14 @@ def format_activity_summary(activity: dict[str, Any], local_tz: str | None = Non
 
     if isinstance(start_time, str) and start_time:
         # Intervals.icu's own local wall-clock time — no conversion needed, just reformat.
-        try:
-            start_time = datetime.fromisoformat(start_time).strftime("%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            pass
+        start_time = _reformat_iso_timestamp(start_time)
     else:
         start_time = activity.get("startTime", activity.get("start_date", "Unknown"))
         if isinstance(start_time, str) and len(start_time) > 10:
             converted = to_local_datetime_str(start_time, local_tz)
-            if converted is not None:
-                start_time = converted
-            else:
-                # No local field and no usable timezone — format the raw UTC value as-is
-                # rather than silently mislabeling it as local.
-                try:
-                    dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                    start_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    pass
+            # No local field and no usable timezone — format the raw UTC value as-is
+            # rather than silently mislabeling it as local.
+            start_time = converted if converted is not None else _reformat_iso_timestamp(start_time)
 
     rpe = activity.get("perceived_exertion", None)
     if rpe is None:
@@ -496,14 +498,7 @@ def format_activity_message(message: dict[str, Any], local_tz: str | None = None
     created = message.get("created", "Unknown")
     if isinstance(created, str) and len(created) > 10:
         converted = to_local_datetime_str(created, local_tz)
-        if converted is not None:
-            created = converted
-        else:
-            try:
-                dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-                created = dt.strftime("%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                pass
+        created = converted if converted is not None else _reformat_iso_timestamp(created)
 
     return f"""Author: {message.get("name", "Unknown")}
 Date: {created}
@@ -513,13 +508,15 @@ Content: {message.get("content", "")}"""
 
 def format_athlete_profile(athlete: dict[str, Any]) -> str:
     """Format an athlete's Intervals.icu account profile into a readable string."""
+    # `or "N/A"` rather than `.get(field, "N/A")`: the field may be present with an
+    # explicit None value (unset on the athlete's account), not just absent.
     return f"""Athlete Profile:
 
-ID: {athlete.get("id", "N/A")}
-Name: {athlete.get("name", "N/A")}
-City: {athlete.get("city", "N/A")}
-Country: {athlete.get("country", "N/A")}
-Timezone: {athlete.get("timezone", "N/A")}"""
+ID: {athlete.get("id") or "N/A"}
+Name: {athlete.get("name") or "N/A"}
+City: {athlete.get("city") or "N/A"}
+Country: {athlete.get("country") or "N/A"}
+Timezone: {athlete.get("timezone") or "N/A"}"""
 
 
 def format_custom_item_details(item: dict[str, Any]) -> str:

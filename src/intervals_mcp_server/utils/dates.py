@@ -66,7 +66,9 @@ def to_local_datetime_str(utc_iso: str, tz_name: str | None) -> str | None:
         dt = dt.replace(tzinfo=timezone.utc)
     try:
         local_dt = dt.astimezone(ZoneInfo(tz_name))
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError):
+        # ZoneInfo raises ValueError (not ZoneInfoNotFoundError) for malformed keys
+        # (e.g. absolute or non-normalized paths), on top of unrecognized names.
         return None
     return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 

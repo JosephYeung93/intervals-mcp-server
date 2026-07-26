@@ -137,6 +137,19 @@ def test_format_athlete_profile():
     assert "Timezone: Australia/Sydney" in result
 
 
+def test_format_athlete_profile_missing_fields_show_not_available():
+    """
+    Test that format_athlete_profile shows "N/A" rather than the literal string "None"
+    for fields the athlete hasn't set on their Intervals.icu account.
+    """
+    athlete = {"id": "i1", "name": "Joseph Yeung", "city": None, "country": None, "timezone": None}
+    result = format_athlete_profile(athlete)
+    assert "City: N/A" in result
+    assert "Country: N/A" in result
+    assert "Timezone: N/A" in result
+    assert "None" not in result
+
+
 def test_format_workout():
     """
     Test that format_workout returns a string containing the workout name and interval count.
