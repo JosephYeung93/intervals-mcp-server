@@ -7,6 +7,8 @@ These tests verify that the formatting functions produce expected output strings
 import json
 from intervals_mcp_server.utils.formatting import (
     format_activity_summary,
+    format_activity_message,
+    format_athlete_profile,
     format_workout,
     format_wellness_entry,
     format_event_summary,
@@ -32,6 +34,120 @@ def test_format_activity_summary():
     result = format_activity_summary(data)
     assert "Activity: Morning Ride" in result
     assert "ID: 1" in result
+
+
+def test_format_activity_summary_uses_start_date_local_as_is():
+    """
+    Test that format_activity_summary prefers start_date_local over the UTC start_date,
+    with no timezone conversion needed since it's already local wall-clock time.
+    """
+    data = {
+        "name": "Kurnell loop",
+        "id": "i169230762",
+        "type": "Ride",
+        "start_date": "2026-07-25T20:36:22Z",
+        "start_date_local": "2026-07-26T06:36:22",
+        "distance": 1000,
+        "duration": 3600,
+    }
+    result = format_activity_summary(data)
+    assert "Date: 2026-07-26 06:36:22" in result
+
+
+def test_format_activity_summary_falls_back_to_converted_utc():
+    """
+    Test that format_activity_summary converts the UTC start_date using the supplied
+    local timezone when start_date_local is absent (e.g. a manually-entered activity).
+    """
+    data = {
+        "name": "Manual entry",
+        "id": "i1",
+        "type": "Ride",
+        "start_date": "2026-07-25T20:36:22Z",
+        "distance": 1000,
+        "duration": 3600,
+    }
+    result = format_activity_summary(data, local_tz="Australia/Sydney")
+    assert "Date: 2026-07-26 06:36:22" in result
+
+
+def test_format_activity_summary_falls_back_to_raw_utc_without_timezone():
+    """
+    Test that format_activity_summary keeps its original UTC-string behavior when neither
+    start_date_local nor a local_tz is available, rather than silently guessing.
+    """
+    data = {
+        "name": "Morning Ride",
+        "id": 1,
+        "type": "Ride",
+        "startTime": "2024-01-01T08:00:00Z",
+        "distance": 1000,
+        "duration": 3600,
+    }
+    result = format_activity_summary(data)
+    assert "Date: 2024-01-01 08:00:00" in result
+
+
+def test_format_activity_message_converts_created_using_local_timezone():
+    """
+    Test that format_activity_message converts the UTC created timestamp into local time
+    when a timezone is supplied, since messages don't carry their own local field.
+    """
+    message = {
+        "name": "Coach",
+        "created": "2026-07-25T20:36:22Z",
+        "type": "TEXT",
+        "content": "Nice work out there",
+    }
+    result = format_activity_message(message, local_tz="Australia/Sydney")
+    assert "Date: 2026-07-26 06:36:22" in result
+
+
+def test_format_activity_message_falls_back_to_raw_utc_without_timezone():
+    """
+    Test that format_activity_message keeps its original UTC-string behavior when no
+    local_tz is supplied.
+    """
+    message = {
+        "name": "Coach",
+        "created": "2024-06-15T11:00:00Z",
+        "type": "TEXT",
+        "content": "Good effort despite that!",
+    }
+    result = format_activity_message(message)
+    assert "Date: 2024-06-15 11:00:00" in result
+
+
+def test_format_athlete_profile():
+    """
+    Test that format_athlete_profile returns a string containing the athlete's
+    location and timezone.
+    """
+    athlete = {
+        "id": "i1",
+        "name": "Joseph Yeung",
+        "city": "Sydney",
+        "country": "Australia",
+        "timezone": "Australia/Sydney",
+    }
+    result = format_athlete_profile(athlete)
+    assert "Name: Joseph Yeung" in result
+    assert "City: Sydney" in result
+    assert "Country: Australia" in result
+    assert "Timezone: Australia/Sydney" in result
+
+
+def test_format_athlete_profile_missing_fields_show_not_available():
+    """
+    Test that format_athlete_profile shows "N/A" rather than the literal string "None"
+    for fields the athlete hasn't set on their Intervals.icu account.
+    """
+    athlete = {"id": "i1", "name": "Joseph Yeung", "city": None, "country": None, "timezone": None}
+    result = format_athlete_profile(athlete)
+    assert "City: N/A" in result
+    assert "Country: N/A" in result
+    assert "Timezone: N/A" in result
+    assert "None" not in result
 
 
 def test_format_workout():

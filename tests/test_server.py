@@ -34,6 +34,7 @@ from intervals_mcp_server.server import (  # pylint: disable=wrong-import-positi
     get_activity_streams,
     add_or_update_event,
     get_athlete_power_curves,
+    get_athlete_profile,
     get_event_by_id,
     get_events,
     get_gear_list,
@@ -45,12 +46,18 @@ from intervals_mcp_server.server import (  # pylint: disable=wrong-import-positi
     delete_custom_item,
 )
 from intervals_mcp_server.tools import gear as gear_module  # pylint: disable=wrong-import-position
+from intervals_mcp_server.tools import athlete as athlete_module  # pylint: disable=wrong-import-position
 from tests.sample_data import INTERVALS_DATA, POWER_CURVES_DATA  # pylint: disable=wrong-import-position
 
 
 def _reset_gear_cache():
     """Helper to clear the module-level gear cache between tests."""
     gear_module._GEAR_RAW_CACHE.clear()  # pylint: disable=protected-access
+
+
+def _reset_athlete_cache():
+    """Helper to clear the module-level athlete cache between tests."""
+    athlete_module._ATHLETE_CACHE.clear()  # pylint: disable=protected-access
 
 
 def test_get_activities(monkeypatch):
@@ -949,3 +956,151 @@ def test_get_activities_resolves_gear_name(monkeypatch):
     assert "Ride 2" in result
     assert "Name: Litening Air" in result
     assert "Name: S-Works Tarmac SL8" in result
+
+
+# ---------------------------------------------------------------------------
+# Athlete profile tool + local-time propagation
+# ---------------------------------------------------------------------------
+
+
+def test_get_athlete_profile(monkeypatch):
+    """
+    Test get_athlete_profile returns a formatted string with the athlete's location/timezone.
+    """
+    _reset_athlete_cache()
+
+    athlete = {
+        "id": "i1",
+        "name": "Joseph Yeung",
+        "city": "Sydney",
+        "country": "Australia",
+        "timezone": "Australia/Sydney",
+    }
+
+    async def fake_request(*_args, **_kwargs):
+        return athlete
+
+    monkeypatch.setattr("intervals_mcp_server.api.client.make_intervals_request", fake_request)
+    monkeypatch.setattr(
+        "intervals_mcp_server.tools.athlete.make_intervals_request", fake_request
+    )
+    result = asyncio.run(get_athlete_profile(athlete_id="i1"))
+    assert "City: Sydney" in result
+    assert "Timezone: Australia/Sydney" in result
+
+
+def test_get_activities_shows_local_time_without_local_field(monkeypatch):
+    """
+    Test that get_activities converts a UTC-only activity's start_date into the athlete's
+    local time, fetched via the athlete-profile lookup.
+    """
+    _reset_gear_cache()
+    _reset_athlete_cache()
+
+    activity = {
+        "name": "Manual entry",
+        "id": 1,
+        "type": "Ride",
+        "start_date": "2026-07-25T20:36:22Z",
+        "distance": 1000,
+        "duration": 3600,
+    }
+    athlete = {"id": "i1", "timezone": "Australia/Sydney"}
+
+    async def fake_request(url=None, **_kwargs):
+        if url and url.rstrip("/").endswith("/athlete/i1"):
+            return athlete
+        if url and "/gear" in url:
+            return []
+        return [activity]
+
+    monkeypatch.setattr("intervals_mcp_server.api.client.make_intervals_request", fake_request)
+    monkeypatch.setattr(
+        "intervals_mcp_server.tools.activities.make_intervals_request", fake_request
+    )
+    monkeypatch.setattr(
+        "intervals_mcp_server.tools.gear.make_intervals_request", fake_request
+    )
+    monkeypatch.setattr(
+        "intervals_mcp_server.tools.athlete.make_intervals_request", fake_request
+    )
+    result = asyncio.run(get_activities(athlete_id="i1", limit=1, include_unnamed=True))
+    assert "Date: 2026-07-26 06:36:22" in result
+
+
+def test_get_activity_details_shows_local_time_without_local_field(monkeypatch):
+    """
+    Test that get_activity_details converts a UTC-only activity's start_date into the
+    athlete's local time, using the configured ATHLETE_ID for the timezone lookup.
+    """
+    _reset_gear_cache()
+    _reset_athlete_cache()
+
+    activity = {
+        "name": "Manual entry",
+        "id": 1,
+        "type": "Ride",
+        "start_date": "2026-07-25T20:36:22Z",
+        "distance": 1000,
+        "duration": 3600,
+    }
+    athlete = {"id": "i1", "timezone": "Australia/Sydney"}
+
+    async def fake_request(url=None, **_kwargs):
+        if url and url.rstrip("/").endswith("/athlete/i1"):
+            return athlete
+        if url and "/gear" in url:
+            return []
+        return activity
+
+    monkeypatch.setattr("intervals_mcp_server.api.client.make_intervals_request", fake_request)
+    monkeypatch.setattr(
+        "intervals_mcp_server.tools.activities.make_intervals_request", fake_request
+    )
+    monkeypatch.setattr(
+        "intervals_mcp_server.tools.gear.make_intervals_request", fake_request
+    )
+    monkeypatch.setattr(
+        "intervals_mcp_server.tools.athlete.make_intervals_request", fake_request
+    )
+    monkeypatch.setattr(gear_module.config, "athlete_id", "i1")
+    monkeypatch.setattr(athlete_module.config, "athlete_id", "i1")
+
+    result = asyncio.run(get_activity_details(1))
+    assert "Date: 2026-07-26 06:36:22" in result
+
+
+def test_get_activity_messages_shows_local_time(monkeypatch):
+    """
+    Test that get_activity_messages converts each message's UTC created timestamp into the
+    athlete's local time.
+    """
+    _reset_athlete_cache()
+
+    messages = [
+        {
+            "id": 1,
+            "name": "Coach",
+            "created": "2026-07-25T20:36:22Z",
+            "type": "TEXT",
+            "content": "Nice work out there",
+        }
+    ]
+    athlete = {"id": "i1", "timezone": "Australia/Sydney"}
+
+    async def fake_request(url=None, **_kwargs):
+        if url and url.rstrip("/").endswith("/athlete/i1"):
+            return athlete
+        return messages
+
+    monkeypatch.setattr("intervals_mcp_server.api.client.make_intervals_request", fake_request)
+    monkeypatch.setattr(
+        "intervals_mcp_server.tools.activities.make_intervals_request", fake_request
+    )
+    monkeypatch.setattr(
+        "intervals_mcp_server.tools.athlete.make_intervals_request", fake_request
+    )
+    monkeypatch.setattr(athlete_module.config, "athlete_id", "i1")
+
+    result = asyncio.run(get_activity_messages(activity_id="i123"))
+    assert "Date: 2026-07-26 06:36:22" in result
