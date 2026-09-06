@@ -249,9 +249,7 @@ def test_format_wellness_entry_labels_a_future_date_as_projected(monkeypatch):
 
     result = format_wellness_entry(entry)
 
-    assert (
-        "Date: 2026-09-16 — PROJECTED (future date; interval.icu decay forecast, not measured)" in result
-    )
+    assert f"Date: 2026-09-16{formatting._PROJECTION_LABEL}" in result
 
 
 def test_format_wellness_entry_todays_date_is_never_labelled(monkeypatch):
@@ -274,6 +272,16 @@ def test_format_wellness_entry_past_date_is_never_labelled(monkeypatch):
 
     assert "Date: 2026-08-20\n" in result
     assert "PROJECTED" not in result
+
+
+def test_format_wellness_entry_todays_date_line_is_byte_identical_to_the_unlabelled_form(monkeypatch):
+    """AC2 says "byte-identical", not just "no PROJECTED substring" -- pin the whole Date: line."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-09-06")
+    entry = {"id": "2026-09-06"}
+
+    result = format_wellness_entry(entry)
+
+    assert result.splitlines()[1] == "Date: 2026-09-06"
 
 
 def test_format_wellness_entry_still_returns_future_rows_unfiltered(monkeypatch):
@@ -317,10 +325,7 @@ def test_format_wellness_entry_projection_label_is_on_the_date_line_itself(monke
     result = format_wellness_entry(entry)
 
     date_line = result.splitlines()[1]
-    assert (
-        date_line
-        == "Date: 2026-09-16 — PROJECTED (future date; interval.icu decay forecast, not measured)"
-    )
+    assert date_line == f"Date: 2026-09-16{formatting._PROJECTION_LABEL}"
 
 
 def test_format_wellness_entry_projection_uses_the_same_clock_as_get_default_end_date(monkeypatch):

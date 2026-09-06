@@ -28,9 +28,12 @@ def _is_future_wellness_date(raw_date: Any) -> bool:
         return False
     try:
         entry_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
-        today = datetime.strptime(get_default_end_date(), "%Y-%m-%d").date()
     except ValueError:
         return False
+    # Not wrapped in the same try/except: get_default_end_date() is internal and controlled, so if it
+    # ever stopped returning "%Y-%m-%d" that's a real regression that should fail loudly, not degrade
+    # into every entry silently going unlabelled.
+    today = datetime.strptime(get_default_end_date(), "%Y-%m-%d").date()
     return entry_date > today
 
 
