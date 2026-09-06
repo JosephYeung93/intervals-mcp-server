@@ -5,6 +5,7 @@ These tests verify that the formatting functions produce expected output strings
 """
 
 import json
+from intervals_mcp_server.utils import formatting
 from intervals_mcp_server.utils.formatting import (
     format_activity_summary,
     format_activity_message,
@@ -233,6 +234,121 @@ def test_format_wellness_entry_macros_populated():
     assert "- Carbohydrates: 310 g" in result
     assert "- Protein: 145 g" in result
     assert "- Fat: 72 g" in result
+
+
+# --- Wellness projections (ADR-0016 / #119 in ai-cycling-coach): future rows are a do-nothing decay
+# forecast, structurally identical to a measured row apart from their date, so the label lives on the
+# Date: line itself rather than a header. "Today" is pinned via `formatting.get_default_end_date` -- the
+# same clock the module compares against -- so these tests never depend on the real wall clock.
+
+
+def test_format_wellness_entry_labels_a_future_date_as_projected(monkeypatch):
+    """AC1: exact wording, on the Date: line."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-09-06")
+    entry = {"id": "2026-09-16", "ctl": 67.7}
+
+    result = format_wellness_entry(entry)
+
+    assert f"Date: 2026-09-16{formatting._PROJECTION_LABEL}" in result
+
+
+def test_format_wellness_entry_todays_date_is_never_labelled(monkeypatch):
+    """AC2: today's own row is a measurement, not a projection."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-09-06")
+    entry = {"id": "2026-09-06", "ctl": 85.9}
+
+    result = format_wellness_entry(entry)
+
+    assert "Date: 2026-09-06\n" in result
+    assert "PROJECTED" not in result
+
+
+def test_format_wellness_entry_past_date_is_never_labelled(monkeypatch):
+    """AC2: byte-identical rendering for a past date is what makes this change purely additive."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-09-06")
+    entry = {"id": "2026-08-20", "ctl": 80}
+
+    result = format_wellness_entry(entry)
+
+    assert "Date: 2026-08-20\n" in result
+    assert "PROJECTED" not in result
+
+
+def test_format_wellness_entry_todays_date_line_is_byte_identical_to_the_unlabelled_form(monkeypatch):
+    """AC2 says "byte-identical", not just "no PROJECTED substring" -- pin the whole Date: line."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-09-06")
+    entry = {"id": "2026-09-06"}
+
+    result = format_wellness_entry(entry)
+
+    assert result.splitlines()[1] == "Date: 2026-09-06"
+
+
+def test_format_wellness_entry_still_returns_future_rows_unfiltered(monkeypatch):
+    """AC6: labelling, never filtering -- "what does my form look like if I rest all week?" must keep
+    working."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-09-06")
+    entry = {"id": "2026-09-16", "ctl": 67.7}
+
+    result = format_wellness_entry(entry)
+
+    assert "Fitness (CTL): 67.7" in result
+
+
+def test_format_wellness_entry_missing_date_renders_unlabelled_not_raising(monkeypatch):
+    """AC7: the existing 'N/A' fallback for a missing id must stay unlabelled, not crash."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-09-06")
+    entry = {"ctl": 80}
+
+    result = format_wellness_entry(entry)
+
+    assert "Date: N/A" in result
+    assert "PROJECTED" not in result
+
+
+def test_format_wellness_entry_unparseable_date_renders_unlabelled_not_raising(monkeypatch):
+    """AC7: a date string interval.icu doesn't actually send, defensively -- must not raise."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-09-06")
+    entry = {"id": "not-a-date", "ctl": 80}
+
+    result = format_wellness_entry(entry)
+
+    assert "Date: not-a-date" in result
+    assert "PROJECTED" not in result
+
+
+def test_format_wellness_entry_projection_label_is_on_the_date_line_itself(monkeypatch):
+    """AC3: the label rides the date line, not a header, so it survives one entry quoted in isolation."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-09-06")
+    entry = {"id": "2026-09-16", "ctl": 67.7}
+
+    result = format_wellness_entry(entry)
+
+    date_line = result.splitlines()[1]
+    assert date_line == f"Date: 2026-09-16{formatting._PROJECTION_LABEL}"
+
+
+def test_format_wellness_entry_projection_uses_the_same_clock_as_get_default_end_date(monkeypatch):
+    """AC4: comparing against `get_default_end_date()` itself -- not a second, separately-derived notion
+    of "today" -- is what this test actually pins; changing what that function returns is the only knob."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-01-01")
+    entry = {"id": "2026-06-15", "ctl": 80}  # future under the patched clock, past under the real one
+
+    result = format_wellness_entry(entry)
+
+    assert "PROJECTED" in result
+
+
+def test_format_event_summary_never_labels_future_dated_events(monkeypatch):
+    """AC5: scoped to wellness. A future-dated calendar event is the athlete's real planned session, and
+    format_event_summary must render one exactly as it always has."""
+    monkeypatch.setattr(formatting, "get_default_end_date", lambda: "2026-09-06")
+    event = {"date": "2026-09-16", "name": "Long ride", "id": 1}
+
+    result = format_event_summary(event)
+
+    assert "PROJECTED" not in result
+    assert "Date: 2026-09-16" in result
 
 
 def test_format_wellness_entry_macros_null_hidden():

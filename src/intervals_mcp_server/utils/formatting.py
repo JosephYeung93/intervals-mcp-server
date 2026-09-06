@@ -8,7 +8,33 @@ import json
 from datetime import datetime
 from typing import Any
 
-from intervals_mcp_server.utils.dates import to_local_datetime_str
+from intervals_mcp_server.utils.dates import get_default_end_date, to_local_datetime_str
+
+
+_PROJECTION_LABEL = " — PROJECTED (future date; interval.icu decay forecast, not measured)"
+
+
+def _is_future_wellness_date(raw_date: Any) -> bool:
+    """True when a wellness entry's own date (its "id") is strictly after today.
+
+    /wellness returns rows dated after today whose CTL/ATL/Form are a do-nothing decay forecast: same
+    fields, same shape as a measured row, so only the date tells them apart. Compared against
+    `get_default_end_date()` -- the same `datetime.now()` clock every other default date in this server
+    already uses -- so "today" can never mean two different things inside one process. A date this can't
+    parse renders unlabelled rather than raising: a label this function can't confidently justify is worse
+    than none.
+    """
+    if not isinstance(raw_date, str):
+        return False
+    try:
+        entry_date = datetime.strptime(raw_date, "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    # Not wrapped in the same try/except: get_default_end_date() is internal and controlled, so if it
+    # ever stopped returning "%Y-%m-%d" that's a real regression that should fail loudly, not degrade
+    # into every entry silently going unlabelled.
+    today = datetime.strptime(get_default_end_date(), "%Y-%m-%d").date()
+    return entry_date > today
 
 
 class _KeyTracker(dict):
@@ -361,7 +387,11 @@ def format_wellness_entry(entries: dict[str, Any], include_all_fields: bool = Fa
         entries.get("tempRestingHR")
 
     lines = ["Wellness Data:"]
-    lines.append(f"Date: {entries.get('id', 'N/A')}")
+    wellness_date = entries.get("id", "N/A")
+    date_line = f"Date: {wellness_date}"
+    if _is_future_wellness_date(wellness_date):
+        date_line += _PROJECTION_LABEL
+    lines.append(date_line)
     lines.append("")
 
     training_metrics = _format_training_metrics(entries)
